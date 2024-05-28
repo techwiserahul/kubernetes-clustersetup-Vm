@@ -36,15 +36,17 @@ net.bridge.bridge-nf-call-ip6tables = 1
 net.ipv4.ip_forward                 = 1
 EOF
 
-sudo sysctl --system
-**Step 2: Install Docker
-Install Docker as the container runtime:******
-
-sudo apt-get update
-sudo apt-get install -y docker.io
-
-sudo systemctl enable docker
-sudo systemctl start docker
+**To Install Cri-dockerD  ******
+git clone https://github.com/Mirantis/cri-dockerd.git
+ cd cri-dockerd
+mkdir bin
+go build -o bin/cri-dockerd
+mkdir -p /usr/local/bin
+sudo install -o root -g root -m 0755 bin/cri-dockerd /usr/local/bin/cri-dockerd
+sudo install packaging/systemd/* /etc/systemd/system
+sudo sed -i -e 's,/usr/bin/cri-dockerd,/usr/local/bin/cri-dockerd,' /etc/systemd/system/cri-docker.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now cri-docker.socket
 **Step 3: Install kubeadm, kubelet, and kubectl
 Add the Kubernetes APT repository and install the necessary packages:******
 
@@ -76,7 +78,21 @@ sudo chown youruser:youruser /home/youruser/.kube/config
 **Step 5: Install a Pod Network Addon
 Install a network addon like Calico for pod networking:******
 
-kubectl apply -f https://docs.projectcalico.org/v3.14/manifests/calico.yaml
+**for setup calico & restart kubelet******
+wget https://github.com/containernetworking/plugins/releases/download/v1.1.1/cni-plugins-linux-amd64-v1.1.1.tgz
+sudo mkdir -p /opt/cni/bin
+sudo tar -C /opt/cni/bin -xzf cni-plugins-linux-amd64-v1.1.1.tgz
+
+kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+
+ls /etc/cni/net.d/
+
+
+sudo systemctl daemon-reload
+sudo systemctl restart kubelet
+
+**For logs**
+journalctl -u kubelet -b
 **Step 6: Join Worker Nodes to the Cluster
 On each worker node, use the join command provided by kubeadm init on the master node. If you don't have the command, generate a new token on the master node:******
 
@@ -85,6 +101,24 @@ kubeadm token create --print-join-command
 
 
 sudo kubeadm join <master-ip>:6443 --token <token> --discovery-token-ca-cert-hash sha256:<hash>
+
+**For worker node****
+sudo apt-get update
+sudo apt-get install -y docker.io
+sudo systemctl enable docker
+sudo systemctl start docker
+sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates curl
+
+sudo curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+
+cat <<EOF | sudo tee /etc/apt/sources.list.d/kubernetes.list
+deb https://apt.kubernetes.io/ kubernetes-xenial main
+EOF
+
+sudo apt-get update
+sudo apt-get install -y kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
 **Step 7: Verify the Cluster
 On the master node, verify that all nodes have joined the cluster and are in the Ready state:******
 kubectl get nodes
